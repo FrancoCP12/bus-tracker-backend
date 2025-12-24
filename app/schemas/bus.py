@@ -6,6 +6,13 @@ class BusCreate(BaseModel):
     company: str
     is_active: bool
 
+class BusUpdate(BaseModel):
+    patent: str | None = None
+    identifier : str | None = None
+    company: str | None = None
+    is_active: bool | None = None
+
+
 class BusResponse(BaseModel):
     id: int
     patent: str
