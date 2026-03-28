@@ -1,75 +1,135 @@
 from dotenv import load_dotenv
-from fastapi import WebSocket
-import redis as r
+import redis.asyncio as r
 import json
 import os
+from typing import Any, AsyncGenerator
 
 load_dotenv()
-host_redis: str | None= os.getenv('HOST_REDIS')
-port_redis: str | None= os.getenv('PORT_REDIS')
 
-# class BusInexist(Exception):
-    # """No se ha encontrado ningun bus con esa descripcion"""
-    # pass
+HOST_REDIS = os.getenv('HOST_REDIS', 'localhost')
+PORT_REDIS = int(os.getenv('PORT_REDIS', 6379))
 
-if port_redis:
-    port: int = int(port_redis)
 
-class ConectionRedis():
-    def __init__(self, host, port) -> None:
-        self.redis = r.Redis(host = host, port= port, decode_responses= True) 
+class ConnectionRedis:
+    """
+    Gestor de conexiones Redis para tracking en tiempo real.
     
-    async def get_location(self, id = None, company = None, websocket = WebSocket):
-        location = {}
-        if id and company:
-            data = self.redis.json().get(f'bus:{company}:{id}')   
-            if data: location[id] = data
+    Maneja almacenamiento y suscripción de ubicaciones GPS
+    de autobuses usando Redis pub/sub y JSON.
+    """
+    
+    def __init__(self, host: str, port: int):
+        self.redis = r.Redis(host=host, port=port, decode_responses=True)
+
+    async def get_location(
+        self,
+        id_bus: str | None = None,
+        company: str | None = None
+    ) -> AsyncGenerator[dict[str, Any], None]:
+        """
+        Obtiene ubicaciones almacenadas de autobuses.
         
-        if company:
-            bus_id = self.redis.smembers(f"list:{company}")
-            for bid in bus_id: # type: ignore
-                data = self.redis.json().get(f"bus:{company}:{bid}")
-                if data: location[bid] = data
-        else:
-            list_keys = self.redis.keys("list:*")
-            for list_key in list_keys: # type: ignore
-                comp_name = list_key.split(":")[-1] 
-                bus_ids = self.redis.smembers(list_key)
-                for bid in bus_ids: # type: ignore
-                    data = self.redis.json().get(f"bus:{comp_name}:{bid}")
-                    if data: location[bid] = data
-
-        # if not all(location):
-        #     raise BusInexist()
-
-        await websocket.send_json({"type": "snapshot", "buses":location})  # type: ignore
-
-        pubsub = self.redis.pubsub()
+        Args:
+            id_bus: Filtrar por ID específico (opcional)
+            company: Filtrar por empresa (opcional)
+            
+        Yields:
+            Dict con snapshot de ubicaciones
+        """
+        location: dict[str, Any] = {}
         
-        if id and company:
-            pubsub.subscribe(f"canal:bus:{company}:{id}")
+        if id_bus and company:
+            data = await self.redis.json().get(f'bus:{company}:{id_bus}')
+            if data:
+                location[id_bus] = data
+
         elif company:
-            pubsub.psubscribe(f"canal:bus:{company}:*")
+            bus_ids = await self.redis.smembers(f"list:{company}")
+            for bid in bus_ids:
+                data = await self.redis.json().get(f"bus:{company}:{bid}")
+                if data:
+                    location[bid] = data
+                    
         else:
-            pubsub.psubscribe(f"canal:bus:*")
+            list_keys = await self.redis.keys("list:*")
+            for list_key in list_keys:
+                comp_name = list_key.split(":")[-1]
+                bus_ids = await self.redis.smembers(list_key)
+                for bid in bus_ids:
+                    data = await self.redis.json().get(f"bus:{comp_name}:{bid}")
+                    if data:
+                        location[bid] = data
 
+        yield {"type": "snapshot", "buses": location}
 
-        async for msj in pubsub.listen(): # type: ignore
-            if msj["type"] == ["message", "pmessage"]:
-                await websocket.send_json({"type": "update", "buses": json().loads(msj["data"])}) # type: ignore
-
-
-    def set_location(self, bus):
+    async def set_location(self, bus: dict[str, Any]) -> bool:
+        """
+        Almacena ubicación de autobús en Redis.
+        
+        Guarda en JSON, mantiene historial de últimas 5 coordenadas,
+        y publica actualización para suscriptores.
+        
+        Args:
+            bus: Dict con id, company, coord
+            
+        Returns:
+            True si se guardó correctamente
+        """
         id_bus = bus['id']
         company_bus = bus['company']
+        current_coord = bus["coord"]
+        key = f"bus:{company_bus}:{id_bus}"
 
-        self.redis.sadd(f"list:{company_bus}", id_bus)
-        self.redis.json().set(f"bus:{company_bus}:{id_bus}", '$', bus)
+        data = bus.copy()
+        data.pop("coord", None)
+        data["coord"] = []
 
-        self.redis.expire(f"bus:{company_bus}:{id_bus}", 60)
-
-        self.redis.publish(f"canal:bus:{company_bus}:{id_bus}", json.dumps(bus))
+        async with self.redis.pipeline(transaction=True) as pipe:
+            pipe.sadd(f"list:{company_bus}", id_bus)
+            pipe.json().set(key, '$', data, nx=True)
+            pipe.json().arrappend(key, "$.coord", current_coord)
+            pipe.json().arrtrim(key, "$.coord", -5, -1)
+            pipe.expire(key, 60)
+            pipe.publish(f"canal:bus:{company_bus}:{id_bus}", json.dumps(bus))
+            await pipe.execute()
 
         return True
-    
-redis = ConectionRedis(host_redis, port_redis)
+
+    async def subscribe(
+        self,
+        company: str | None = None,
+        id_bus: str | None = None
+    ) -> AsyncGenerator[dict[str, Any], None]:
+        """
+        Suscribe a actualizaciones de ubicación en tiempo real.
+        
+        Args:
+            company: Filtrar por empresa (opcional)
+            id_bus: Filtrar por ID específico (opcional)
+            
+        Yields:
+            Dict con actualización de autobús
+        """
+        pubsub = self.redis.pubsub()
+        
+        try:
+            async for _ in self.get_location(id_bus, company):
+                pass
+            
+            if id_bus and company:
+                await pubsub.subscribe(f"canal:bus:{company}:{id_bus}")
+            elif company:
+                await pubsub.psubscribe(f"canal:bus:{company}:*")
+            else:
+                await pubsub.psubscribe(f"canal:bus:*")
+
+            async for msg in pubsub.listen():
+                if msg["type"] in ["message", "pmessage"]:
+                    yield {"type": "update", "buses": json.loads(msg["data"])}
+                    
+        finally:
+            await pubsub.unsubscribe()
+            await pubsub.close()
+
+
+redis = ConnectionRedis(HOST_REDIS, PORT_REDIS)
