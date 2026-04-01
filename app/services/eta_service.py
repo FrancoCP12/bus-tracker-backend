@@ -1,3 +1,4 @@
+from app.models.bus import Bus
 from sqlalchemy import func
 from sqlalchemy.orm import Session
 from geoalchemy2.functions import ST_LineLocatePoint
@@ -7,27 +8,16 @@ from geopy.distance import geodesic
 from typing import Any
 
 
-async def calculate_speed(redis: Any, company: str, id_bus: str) -> float:
+async def calculate_speed(coords: list[float]) -> float:
     """
     Calcula la velocidad promedio de un autobús basada en su historial.
     
     Args:
-        redis: Instancia de ConnectionRedis
-        company: Nombre de la empresa
-        id_bus: ID del autobús
+        bus_data: diccionario con los datos de el/los buses  a calcular la velocidad
         
     Returns:
         Velocidad en metros por segundo
     """
-    bus_data: dict[str, Any] = {"coords": []}
-    
-    async for data in redis.get_location(company, id_bus):
-        if data.get("buses", {}).get(id_bus):
-            bus_data = data["buses"][id_bus]
-            break
-    
-    coords = bus_data.get("coords", [])
-    
     if len(coords) < 2:
         return 0.0
     
@@ -50,47 +40,35 @@ async def calculate_speed(redis: Any, company: str, id_bus: str) -> float:
 
 def get_distance_to_stop(
     db: Session,
-    route_id: int,
     bus_lon: float,
     bus_lat: float,
     stop_id: int
-) -> dict[str, float]:
+) -> float:
     """
     Calcula distancia y progreso de un autobús respecto a una parada.
     
     Args:
         db: Sesión de base de datos
-        route_id: ID de la ruta
         bus_lon: Longitud actual del autobús
         bus_lat: Latitud actual del autobús
+        bus_id: ID del bus
         stop_id: ID de la parada destino
         
     Returns:
-        Dict con progreso del bus, progreso de parada y distancia en metros
+        Distancia en metros
     """
     bus_point = func.ST_SetSRID(func.ST_MakePoint(bus_lon, bus_lat), 4326)
     
     query = db.query(
-        ST_LineLocatePoint(Route.position, bus_point).label("bus_progress"),
-        ST_LineLocatePoint(Route.position, BusStop.position).label("stop_progress"),
         func.ST_Distance(
             func.ST_LineInterpolatePoint(Route.position, ST_LineLocatePoint(Route.position, bus_point)),
             func.ST_LineInterpolatePoint(Route.position, ST_LineLocatePoint(Route.position, BusStop.position)),
             True 
-        ).label("distance_meters")
-    ).join(BusStop, BusStop.id_bus_stop == stop_id)\
-     .filter(Route.id_route == route_id)\
-     .first()
+        )).filter(and_(Bus.id_route == Route.id_route, Bus.id_route == BusStop.id_route, BusStop.id_bus_stop == stop_id))\
+        .first()
 
     if query is None:
-        return {
-            "bus_progress": 0.0,
-            "stop_progress": 0.0,
-            "distance_meters": 0.0
-        }
-
-    return {
-        "bus_progress": float(query.bus_progress),
-        "stop_progress": float(query.stop_progress),
-        "distance_meters": float(query.distance_meters)
-    }
+        return 0.0
+        
+    return float(query.distance_meters)
+    

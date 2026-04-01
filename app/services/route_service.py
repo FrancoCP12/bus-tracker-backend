@@ -1,4 +1,5 @@
 
+from app.models.route import Route
 from sqlalchemy.orm import Session
 from app.api.route import GeoJson
 from geoalchemy2 import Geography
@@ -8,7 +9,7 @@ from app.models.bus_stop import BusStop
 from app.models.bus import Bus
 import json
 
-def toGeoJson(geojson: GeoJson, session: Session):
+def toGeoJson(geojson: GeoJson, session: Session, bus_id: int):
     data = json.loads(geojson.geojson)
     features = data.get('features', [])
    
@@ -39,6 +40,8 @@ def toGeoJson(geojson: GeoJson, session: Session):
                 session.add(nueva_parada)
                 new_route.stops.append(nueva_parada)
 
+    new_bus = session.query(Bus).filter(Bus.id_bus == bus_id).first()
+    new_bus.id_route = new_route.id_route 
     session.commit()
     return {"message": "Ruta y paradas procesadas correctamente"}
 
@@ -53,3 +56,19 @@ def get_bus_stop(user_lat: float, user_lon: float, session: Session):
         ).all()
     return stops
 
+def next_bus_stop(bus_id, bus_lat, bus_lon, session: Session):
+    bus_point = f"SRID=4326;POINT({bus_lon} {bus_lat})"
+
+    bus_stop = session.query(BusStop)\
+        .join(Bus, and_(BusStop.id_route == Bus.id_route, Bus.id_bus == bus_id))\
+        .filter(
+                T_LineLocatePoint(Route.position, bus_point) < 
+                ST_LineLocatePoint(Route.position, BusStop.position))\
+        .order_by(ST_LineLocatePoint(Route.position, BusStop.position))\
+        .first()
+        
+    return bus_stop
+
+def get_buses_by_busStop(stop_id: int, session: Session)-> list[int]:
+    buses_id = session.query(Bus.id_bus).filter(and_(Bus.id_route == BusStop.id_route, BusStop.id_bus_stop == stop_id)).all()
+    return buses_id
