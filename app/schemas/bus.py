@@ -1,5 +1,3 @@
-from sqlalchemy.orm import Session
-from app.models.bus import Bus
 from pydantic import BaseModel
 
 
@@ -7,7 +5,7 @@ class BusCreate(BaseModel):
     patent: str
     identifier: str
     company: str
-    is_active: bool
+    is_active: bool = True
 
 
 class BusUpdate(BaseModel):
@@ -18,7 +16,7 @@ class BusUpdate(BaseModel):
 
 
 class BusResponse(BaseModel):
-    id: int
+    id_bus: int
     patent: str
     identifier: str
     company: str

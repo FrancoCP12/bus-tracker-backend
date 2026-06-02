@@ -10,6 +10,7 @@ from alembic import context
 from app.db.base import Base
 from app.models.bus import Bus
 from app.models.route import Route
+from app.models.bus_stop import BusStop
 
 from dotenv import load_dotenv
 load_dotenv()
