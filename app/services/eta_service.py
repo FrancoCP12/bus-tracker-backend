@@ -8,8 +8,8 @@ def calculate_speed(coords: list[list[float]]) -> float:
 
     total_distance = 0.0
     for i in range(len(coords) - 1):
-        coord_a = (coords[i][0], coords[i][1])
-        coord_b = (coords[i + 1][0], coords[i + 1][1])
+        coord_a = (coords[i][1], coords[i][0])
+        coord_b = (coords[i + 1][1], coords[i + 1][0])
         total_distance += geodesic(coord_a, coord_b).meters
 
     time_0 = coords[0][2]

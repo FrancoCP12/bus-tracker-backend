@@ -9,14 +9,21 @@
 # https://github.com/docker/awesome-compose
 services:
   server:
+    networks:
+      mired:
+        aliases:
+          - server
+    restart: always
     env_file:
       - .env
     build:
       context: .
-    volumes:
-      - .:/app  # <-- ESTO mapea tu carpeta actual a la del contenedor
     ports:
-      - 8000:8000
+      - "8000:8000"
+
+networks: 
+  mired:   
+    external: true
 
 
 # The commented out section below is an example of how to define a PostgreSQL

@@ -1,15 +1,17 @@
-import redis.asyncio as r
+import redis.asyncio as redis_async
 import json
 import os
 from typing import Any, AsyncGenerator
 
-HOST_REDIS = os.getenv("HOST_REDIS", "localhost")
-PORT_REDIS = int(os.getenv("PORT_REDIS", 6379))
+from app.domain.interfaces.location_service import ILocationService
+
+REDIS_HOST = os.getenv("HOST_REDIS", "localhost")
+REDIS_PORT = int(os.getenv("PORT_REDIS", 6379))
 
 
-class LocationService:
-    def __init__(self, host: str, port: int):
-        self._redis = r.Redis(host=host, port=port, decode_responses=True)
+class RedisLocationService(ILocationService):
+    def __init__(self, host: str = REDIS_HOST, port: int = REDIS_PORT):
+        self._redis = redis_async.Redis(host=host, port=port, decode_responses=True)
 
     async def get_location(
         self, id_bus: str | None = None, company: str | None = None
@@ -83,5 +85,10 @@ class LocationService:
             await pubsub.close()
 
 
-def get_location_service() -> LocationService:
-    return LocationService(HOST_REDIS, PORT_REDIS)
+_location_service: RedisLocationService | None = None
+
+def get_location_service() -> RedisLocationService:
+    global _location_service
+    if _location_service is None:
+        _location_service = RedisLocationService()
+    return _location_service

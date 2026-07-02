@@ -1,19 +1,20 @@
-from fastapi import APIRouter, Depends, Query
-from app.repositories.route_repository import search_buses_by_location
-from sqlalchemy.orm import Session
-from app.db.base import get_db
+from fastapi import APIRouter, Depends, Query, HTTPException
+from app.use_cases.route import RouteUseCase
+from app.domain.exceptions import InvalidParameters
+from app.api.dependencies import get_route_use_case
 
 router = APIRouter(prefix="/locations", tags=["locations"])
 
 
 @router.post("/search/")
 def search_bus(
-    lat_origen: float = Query(..., description="Latitud del punto de origen"),
-    lon_origen: float = Query(..., description="Longitud del punto de origen"),
-    lat_destiny: float = Query(..., description="Latitud del punto de destino"),
-    lon_destiny: float = Query(..., description="Longitud del punto de destino"),
-    db: Session = Depends(get_db),
+    lat_origin: float = Query(..., description="Latitud del punto de origen"),
+    lon_origin: float = Query(..., description="Longitud del punto de origen"),
+    lat_dest: float = Query(..., description="Latitud del punto de destino"),
+    lon_dest: float = Query(..., description="Longitud del punto de destino"),
+    uc: RouteUseCase = Depends(get_route_use_case),
 ):
-    return search_buses_by_location(
-        db, lat_origen, lon_origen, lat_destiny, lon_destiny
-    )
+    try:
+        return uc.search_buses(lat_origin, lon_origin, lat_dest, lon_dest)
+    except InvalidParameters:
+        raise HTTPException(status_code=400, detail="Parámetros inválidos")

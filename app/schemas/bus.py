@@ -1,4 +1,4 @@
-from pydantic import BaseModel
+from pydantic import ConfigDict, BaseModel
 
 
 class BusCreate(BaseModel):
@@ -21,6 +21,6 @@ class BusResponse(BaseModel):
     identifier: str
     company: str
     is_active: bool
-
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(
+        from_attributes=True,
+    )

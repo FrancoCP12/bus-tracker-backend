@@ -1,45 +1,36 @@
-from fastapi import Depends, APIRouter, HTTPException
-from app.db.base import get_db
+from fastapi import APIRouter, Depends
 from app.schemas.bus import BusCreate, BusResponse, BusUpdate
-from app.repositories.bus_repository import (
-    get_all,
-    get_by_patent,
-    create as create_bus_repo,
-    update as update_bus_repo,
-)
-from app.models.bus import Bus
-from sqlalchemy.orm import Session
-from typing import Optional
+from app.use_cases.bus import BusUseCase
+from app.domain.exceptions import BusAlreadyExists, BusNotFound
+from app.api.dependencies import get_bus_use_case
+from fastapi import HTTPException
 
 router = APIRouter(prefix="/buses", tags=["buses"])
 
 
 @router.get("/", response_model=list[BusResponse])
 def list_buses(
-    id: Optional[int] = None,
-    patent: Optional[str] = None,
-    identifier: Optional[str] = None,
-    company: Optional[str] = None,
-    is_active: Optional[bool] = None,
-    db: Session = Depends(get_db),
+    id: int | None = None,
+    patent: str | None = None,
+    identifier: str | None = None,
+    company: str | None = None,
+    is_active: bool | None = None,
+    uc: BusUseCase = Depends(get_bus_use_case),
 ):
-    return get_all(db, id, patent, identifier, company, is_active)
+    return uc.list_buses(id, patent, identifier, company, is_active)
 
 
 @router.post("/", response_model=BusResponse)
-def create_bus(bus: BusCreate, db: Session = Depends(get_db)):
-    if get_by_patent(db, bus.patent):
+def create_bus(bus: BusCreate, uc: BusUseCase = Depends(get_bus_use_case)):
+    try:
+        return uc.create(bus)
+    except BusAlreadyExists:
         raise HTTPException(status_code=400, detail="Bus already exists")
-
-    new_bus = Bus(**bus.model_dump())
-    return create_bus_repo(db, new_bus)
 
 
 @router.patch("/{bus_id}", response_model=BusResponse)
-def update_bus(bus_id: int, bus: BusUpdate, db: Session = Depends(get_db)):
-    db_bus = get_all(db, id=bus_id)[0] if get_all(db, id=bus_id) else None
-    if not db_bus:
+def update_bus(bus_id: int, bus: BusUpdate, uc: BusUseCase = Depends(get_bus_use_case)):
+    try:
+        return uc.update(bus_id, bus)
+    except BusNotFound:
         raise HTTPException(status_code=404, detail="Bus not found")
-
-    updates = bus.model_dump(exclude_unset=True)
-    return update_bus_repo(db, db_bus, updates)
