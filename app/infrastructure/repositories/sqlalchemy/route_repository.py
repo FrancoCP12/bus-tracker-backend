@@ -19,29 +19,27 @@ from app.domain.exceptions import InvalidGeoJson
 from app.models.route import Route as RouteModel
 from app.models.bus_stop import BusStop as BusStopModel
 from app.models.bus import Bus as BusModel
+from app.core.config.config import settings
 
-GEO_SRID = 4326
-NEAR_STOP_METERS = 15
-NEAR_USER_METERS = 500
-SEARCH_DEGREES = 0.0045
+
 
 
 def _point_wkt(lon: float, lat: float) -> str:
-    return f"SRID={GEO_SRID};POINT({lon} {lat})"
+    return f"SRID={settings.geo_srid};POINT({lon} {lat})"
 
 
 class SQLRouteRepository(IRouteRepository):
     def __init__(self, session: Session):
         self._session = session
 
-    def get_stops_near(self, lat: float, lon: float, radius_m: int = NEAR_USER_METERS) -> list[BusStop]:
+    def get_stops_near(self, lat: float, lon: float, radius_m: int = settings.near_user_meters) -> list[BusStop]:
         user_point = _point_wkt(lon, lat)
         results = (
             self._session.query(BusStopModel)
             .filter(
                 func.ST_DWithin(
                     func.cast(BusStopModel.position, Geography),
-                    func.cast(func.ST_GeomFromText(user_point, GEO_SRID), Geography),
+                    func.cast(func.ST_GeomFromText(user_point, settings.geo_srid), Geography),
                     radius_m,
                 )
             )
@@ -113,8 +111,8 @@ class SQLRouteRepository(IRouteRepository):
             .join(P_Destiny, RouteModel.id_route == P_Destiny.id_route)
             .where(
                 and_(
-                    ST_DWithin(P_Origen.position, user_point, SEARCH_DEGREES),
-                    ST_DWithin(P_Destiny.position, final_point, SEARCH_DEGREES),
+                    ST_DWithin(P_Origen.position, user_point, settings.search_degrees),
+                    ST_DWithin(P_Destiny.position, final_point, settings.search_degrees),
                     ST_LineLocatePoint(RouteModel.position, P_Origen.position)
                     < ST_LineLocatePoint(RouteModel.position, P_Destiny.position),
                 )
@@ -127,7 +125,7 @@ class SQLRouteRepository(IRouteRepository):
         return [self._to_domain_bus(b) for b in results]
 
     def get_distance_to_stop(self, bus_lon: float, bus_lat: float, stop_id: int) -> float:
-        bus_point = ST_SetSRID(ST_MakePoint(bus_lon, bus_lat), GEO_SRID)
+        bus_point = ST_SetSRID(ST_MakePoint(bus_lon, bus_lat), settings.geo_srid)
 
         result = (
             self._session.query(
@@ -166,22 +164,22 @@ class SQLRouteRepository(IRouteRepository):
             raise InvalidGeoJson("No se encontró una ruta en el GeoJSON")
 
         geom_route = shape(route_data["geometry"])
-        new_route = RouteModel(position=f"SRID={GEO_SRID};{geom_route.wkt}")
+        new_route = RouteModel(position=f"SRID={settings.geo_srid};{geom_route.wkt}")
         self._session.add(new_route)
         self._session.flush()
 
         for f in features:
             if f["properties"].get("type") == "bus_stop":
                 geom_stop = shape(f["geometry"])
-                point_wkt = f"SRID={GEO_SRID};{geom_stop.wkt}"
+                point_wkt = f"SRID={settings.geo_srid};{geom_stop.wkt}"
 
                 existing_stop = (
                     self._session.query(BusStopModel)
                     .filter(
                         func.ST_DWithin(
                             func.cast(BusStopModel.position, Geography),
-                            func.cast(func.ST_GeomFromText(point_wkt, GEO_SRID), Geography),
-                            NEAR_STOP_METERS,
+                            func.cast(func.ST_GeomFromText(point_wkt, settings.geo_srid), Geography),
+                            settings.near_stop_meters,
                         )
                     )
                     .first()

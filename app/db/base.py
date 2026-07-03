@@ -1,15 +1,8 @@
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker, DeclarativeBase
-from dotenv import load_dotenv
-import os
+from app.core.config.config import settings
 
-load_dotenv()
-
-DATABASE_URL = os.getenv(
-    "DATABASE_URL", "postgresql://user:pass@localhost:5432/bustracker"
-)
-
-engine = create_engine(DATABASE_URL)
+engine = create_engine(settings.database_url)
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 
 
